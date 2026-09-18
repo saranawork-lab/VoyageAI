@@ -8,14 +8,18 @@ logger = logging.getLogger(__name__)
 def get_razorpay_client():
     return razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
 
-def create_order(amount_paise: int, receipt: str):
+def create_order(amount_paise: int, receipt: str, notes: dict = None):
     client = get_razorpay_client()
     try:
-        order = client.order.create({
+        order_data = {
             "amount": amount_paise,
             "currency": "INR",
             "receipt": receipt
-        })
+        }
+        if notes:
+            order_data["notes"] = notes
+            
+        order = client.order.create(order_data)
         return order
     except Exception as e:
         logger.error(f"Failed to create Razorpay order: {e}")
