@@ -1,16 +1,4 @@
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signOut,
-  sendPasswordResetEmail
-} from 'firebase/auth';
-import {
-  doc,
-  setDoc,
-  getDoc,
-  serverTimestamp
-} from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
+import axios from 'axios';
 import type { ApiResponse } from '@/types/api.types';
 import type {
   UserProfile,
@@ -21,13 +9,21 @@ import type {
   ResetPasswordPayload,
 } from '@/types/user.types';
 
-// Helper to fetch user document from Firestore
-const fetchUserProfile = async (uid: string): Promise<UserProfile> => {
-  const userDoc = await getDoc(doc(db, 'users', uid));
-  if (!userDoc.exists()) {
-    throw new Error('User profile not found in database.');
+const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const apiClient = axios.create({
+  baseURL: `${API_URL}/api/v1`,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Helper to set auth token
+export const setAuthToken = (token: string | null) => {
+  if (token) {
+    apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  } else {
+    delete apiClient.defaults.headers.common['Authorization'];
   }
-  return { id: userDoc.id, ...userDoc.data() } as UserProfile;
 };
 
 // ── API Functions ──────────────────────────────────────────
@@ -36,18 +32,18 @@ export const loginUser = async (
   payload: LoginPayload
 ): Promise<ApiResponse<{ user: UserProfile; tokens: AuthTokens }>> => {
   try {
-    // Note: Firebase Auth expects email, but payload has emailOrPhone.
-    // For this implementation, we assume it's an email address.
-    const userCredential = await signInWithEmailAndPassword(auth, payload.emailOrPhone, payload.password);
-    const token = await userCredential.user.getIdToken();
-    
-    const userProfile = await fetchUserProfile(userCredential.user.uid);
+    // Note: The backend expects 'phone' and 'password'
+    const response = await apiClient.post('/auth/login', {
+      phone: payload.emailOrPhone,
+      password: payload.password
+    });
+    const data = response.data;
     
     return {
       success: true,
       data: {
-        user: userProfile,
-        tokens: { accessToken: token, refreshToken: userCredential.user.refreshToken }
+        user: data.user,
+        tokens: { accessToken: data.accessToken, refreshToken: data.accessToken } // The backend returns just accessToken for now
       }
     };
   } catch (error: any) {
@@ -58,39 +54,12 @@ export const loginUser = async (
 
 export const registerUser = async (
   payload: RegisterPayload
-): Promise<ApiResponse<{ user: UserProfile; tokens: AuthTokens }>> => {
+): Promise<ApiResponse<{ userId: string; message: string }>> => {
   try {
-    const userCredential = await createUserWithEmailAndPassword(auth, payload.email, payload.password);
-    const uid = userCredential.user.uid;
-    const token = await userCredential.user.getIdToken();
-
-    // Create the Firestore document
-    const newUserProfile: Omit<UserProfile, 'id'> = {
-      name: payload.name,
-      email: payload.email,
-      phone: payload.phone || '',
-      role: payload.role,
-      tier: 'free',
-      avatarUrl: null,
-      location: '',
-      language: ['English'],
-      isOnboarded: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    await setDoc(doc(db, 'users', uid), {
-      ...newUserProfile,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-
+    const response = await apiClient.post('/auth/register', payload);
     return {
       success: true,
-      data: {
-        user: { id: uid, ...newUserProfile },
-        tokens: { accessToken: token, refreshToken: userCredential.user.refreshToken }
-      }
+      data: response.data // Should contain { userId, message }
     };
   } catch (error: any) {
     console.error('Register Error:', error);
@@ -100,44 +69,54 @@ export const registerUser = async (
 
 export const verifyOtp = async (
   payload: OtpPayload
-): Promise<ApiResponse<{ verified: boolean }>> => {
-  // Mocked: Phone Auth OTP verification typically requires Firebase PhoneAuthProvider
-  // and a recaptcha verifier. For now, this remains a stub.
-  if (payload.otp === '123456' || payload.otp.length === 6) {
-    return { success: true, data: { verified: true } };
+): Promise<ApiResponse<{ user: UserProfile; tokens: AuthTokens }>> => {
+  try {
+    const response = await apiClient.post('/auth/verify-otp', payload);
+    const data = response.data;
+    return { 
+      success: true, 
+      data: {
+        user: data.user,
+        tokens: { accessToken: data.accessToken, refreshToken: data.accessToken }
+      } 
+    };
+  } catch (error: any) {
+    console.error('Verify OTP Error:', error);
+    throw error;
   }
-  throw new Error('Invalid OTP');
+};
+
+export const resendOtp = async (
+  userId: string
+): Promise<ApiResponse<{ message: string }>> => {
+  try {
+    const response = await apiClient.post('/auth/resend-otp', { userId });
+    return { success: true, data: response.data };
+  } catch (error: any) {
+    console.error('Resend OTP Error:', error);
+    throw error;
+  }
 };
 
 export const getMe = async (): Promise<ApiResponse<UserProfile>> => {
   try {
-    const currentUser = auth.currentUser;
-    if (!currentUser) throw new Error('Not authenticated');
-    
-    const userProfile = await fetchUserProfile(currentUser.uid);
-    return { success: true, data: userProfile };
+    const response = await apiClient.get('/auth/me');
+    return { success: true, data: response.data };
   } catch (error: any) {
     throw error;
   }
 };
 
 export const refreshToken = async (): Promise<ApiResponse<{ accessToken: string }>> => {
-  try {
-    const currentUser = auth.currentUser;
-    if (!currentUser) throw new Error('Not authenticated');
-    
-    const token = await currentUser.getIdToken(true);
-    return { success: true, data: { accessToken: token } };
-  } catch (error: any) {
-    throw error;
-  }
+  // Stub for token refresh if you implement it on the backend
+  throw new Error('Not implemented');
 };
 
 export const logoutUser = async (): Promise<ApiResponse<{ success: boolean }>> => {
   try {
-    await signOut(auth);
-    // Explicitly cast the returned data so TS knows it has the success property.
-    return { success: true, data: { success: true } } as ApiResponse<{ success: boolean }>;
+    // We can clear token client side, or call a backend logout route if it exists
+    setAuthToken(null);
+    return { success: true, data: { success: true } };
   } catch (error: any) {
     throw error;
   }
@@ -146,68 +125,18 @@ export const logoutUser = async (): Promise<ApiResponse<{ success: boolean }>> =
 export const forgotPassword = async (
   email: string
 ): Promise<ApiResponse<{ sent: boolean }>> => {
-  try {
-    await sendPasswordResetEmail(auth, email);
-    return { success: true, data: { sent: true } };
-  } catch (error: any) {
-    throw error;
-  }
+  // Stub - needs backend implementation
+  return { success: true, data: { sent: true } };
 };
 
 export const resetPassword = async (
   payload: ResetPasswordPayload
 ): Promise<ApiResponse<{ reset: boolean }>> => {
-  // Custom reset password handling typically uses confirmPasswordReset
-  // This is a stub for the custom flow if required
+  // Stub - needs backend implementation
   return { success: true, data: { reset: true } };
 };
 
-import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-
 export const googleAuth = async (): Promise<ApiResponse<{ user: UserProfile; tokens: AuthTokens }>> => {
-  try {
-    const provider = new GoogleAuthProvider();
-    const userCredential = await signInWithPopup(auth, provider);
-    const token = await userCredential.user.getIdToken();
-    const uid = userCredential.user.uid;
-
-    let userProfile: UserProfile;
-    try {
-      // Check if user exists in Firestore
-      userProfile = await fetchUserProfile(uid);
-    } catch (e) {
-      // If not, this is their first time logging in with Google, create the profile
-      const newUserProfile: Omit<UserProfile, 'id'> = {
-        name: userCredential.user.displayName || 'Google User',
-        email: userCredential.user.email || '',
-        phone: userCredential.user.phoneNumber || '',
-        role: 'student', // Default role for OAuth users
-        tier: 'free',
-        avatarUrl: userCredential.user.photoURL || null,
-        location: '',
-        language: ['English'],
-        isOnboarded: false,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      await setDoc(doc(db, 'users', uid), {
-        ...newUserProfile,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-      userProfile = { id: uid, ...newUserProfile };
-    }
-
-    return {
-      success: true,
-      data: {
-        user: userProfile,
-        tokens: { accessToken: token, refreshToken: userCredential.user.refreshToken }
-      }
-    };
-  } catch (error: any) {
-    console.error('Google Auth Error:', error);
-    throw error;
-  }
+  // Stub - You can implement a backend endpoint to handle Google OAuth tokens
+  throw new Error('Google Auth not migrated to backend yet');
 };

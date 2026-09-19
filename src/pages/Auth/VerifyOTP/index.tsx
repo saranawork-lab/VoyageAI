@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Compass } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/hooks/useAuth';
@@ -6,8 +6,30 @@ import { useAuth } from '@/hooks/useAuth';
 export const VerifyOTPPage: React.FC = () => {
   const [otp, setOtp] = useState<string[]>(Array(6).fill(''));
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [countdown, setCountdown] = useState(45);
+  const [isResending, setIsResending] = useState(false);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
-  const { verifyOTP } = useAuth();
+  const { verifyOTP, resendOTP } = useAuth();
+
+  useEffect(() => {
+    if (countdown > 0) {
+      const timerId = setTimeout(() => setCountdown(countdown - 1), 1000);
+      return () => clearTimeout(timerId);
+    }
+  }, [countdown]);
+
+  const handleResend = async () => {
+    if (countdown > 0) return;
+    setIsResending(true);
+    try {
+      await resendOTP();
+      setCountdown(45); // Reset timer on success
+    } catch {
+      // errors handled in hook
+    } finally {
+      setIsResending(false);
+    }
+  };
 
   const handleChange = (index: number, value: string) => {
     if (!/^\d*$/.test(value)) return;
@@ -44,7 +66,7 @@ export const VerifyOTPPage: React.FC = () => {
     if (code.length !== 6) return;
     setIsSubmitting(true);
     try {
-      await verifyOTP({ phone: '+919876543210', otp: code });
+      await verifyOTP(code);
     } catch {
       // handled
     } finally {
@@ -102,11 +124,19 @@ export const VerifyOTPPage: React.FC = () => {
           </Button>
 
           <div className="mt-6">
-            <p className="text-sm text-text-light">
-              Didn't receive the code?{' '}
-              <button className="text-primary font-medium hover:underline">
-                Resend OTP
-              </button>
+            <p className="text-sm text-text-light flex items-center justify-center gap-2">
+              Didn't receive the code?
+              {countdown > 0 ? (
+                <span className="text-text-mid font-medium">Wait {countdown}s</span>
+              ) : (
+                <button 
+                  onClick={handleResend}
+                  disabled={isResending}
+                  className="text-primary font-medium hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isResending ? 'Sending...' : 'Resend OTP'}
+                </button>
+              )}
             </p>
           </div>
         </div>

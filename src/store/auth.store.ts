@@ -8,10 +8,12 @@ interface AuthState {
   role: UserRole | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  pendingUserId: string | null;
   setUser: (user: UserProfile) => void;
   setToken: (token: string) => void;
   setTier: (tier: UserTier) => void;
   setLoading: (loading: boolean) => void;
+  setPendingUserId: (id: string | null) => void;
   clearAuth: () => void;
 }
 
@@ -22,6 +24,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   role: null,
   isAuthenticated: false,
   isLoading: true,
+  pendingUserId: null,
 
   setUser: (user) =>
     set({
@@ -41,6 +44,9 @@ export const useAuthStore = create<AuthState>((set) => ({
   setLoading: (loading) =>
     set({ isLoading: loading }),
 
+  setPendingUserId: (id) =>
+    set({ pendingUserId: id }),
+
   clearAuth: () =>
     set({
       user: null,
@@ -49,5 +55,6 @@ export const useAuthStore = create<AuthState>((set) => ({
       role: null,
       isAuthenticated: false,
       isLoading: false,
+      pendingUserId: null,
     }),
 }));
